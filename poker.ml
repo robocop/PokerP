@@ -51,11 +51,11 @@ struct
     | V e -> e
   let eval_card (t,_) = eval_type t
 
-  let sort_list main = 
-    let l = List.map (fun c -> (c, eval_card c)) main in
+  let sort_list list= 
+    let l = List.map (fun c -> (c, eval_card c)) list in
       List.map fst $ List.sort (fun (_,a) (_,b) -> compare b a) l
 
-  (* Useless *)
+
   let same f l = 
     let rec same' v = function
       | [] -> true
