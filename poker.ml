@@ -54,8 +54,6 @@ struct
   let sort_list list= 
     let l = List.map (fun c -> (c, eval_card c)) list in
       List.map fst $ List.sort (fun (_,a) (_,b) -> compare b a) l
-
-
   let same f l = 
     let rec same' v = function
       | [] -> true
@@ -65,7 +63,6 @@ struct
     in
     let l = List.map f l in
       same' (List.hd l) (List.tl l)
-
   (* Makes sure the elements of the list are consecutive *)
   let consecutive l = 
     let rec consecutive' c = function
@@ -208,35 +205,104 @@ struct
 	compare_kickers (a, b)
 end
 
+module Heap = 
+struct
+  let l_cardt = [Ace; King; Queen; Jack; V 10; V 9; V 8; V 7; V 6; V 5; V 4; V 3; V 2]
+  let l_colors = [Hearts; Spades; Clubs; Diamonds]
+  let init() = Random.self_init()
+  (* retourne true avec une probabilite de 1/n *)
+  let prob n () = Random.int n = 0
+  let rec make_tl e = function
+    | [] -> []
+    | h::t -> (h, e)::make_tl e t
+  (* Retourne le jeu de 52 cartes *)
+  let init_cards = List.concat $ List.map (fun e -> make_tl e l_cardt) l_colors;;
+
+  type heap = int * card list
+  let init_heap = (52, init_cards)
+
+  let take_card (n, cards) = 
+    let rec aux l c = function
+      | [] -> failwith "empty heap"
+      | e::tail ->
+	  if prob c () then (e, (n-1, l@tail))
+	  else
+	    aux (e::l) (c-1) tail
+    in
+      aux [] n cards
+  let select_card card (n, list) = 
+    let rec aux l = function
+      | [] -> failwith "card not found"
+      | e::t ->
+	  if e = card then (n-1, l@t)
+	  else
+	    aux (e::l) t
+    in
+      aux [] list
+end
 type tour_type = 
     Preflop
   | Flop
   | Turn
   | River
   | End
-;;
+
 (* représente l'état d'un jeu *) 
 type game = 
 {
+  (* le tas de cartes restantes *)
+  heap: Heap.heap;
   (* Ou on en est dans la distribution des cartes *)
   tour: tour_type;
-  (* position du joueur a qui on est en train de distribuer des cartes *)
+  (* nombres de joueurs sur la table *)
   num_players:int;
   (* notre postion sur la table *)
   my_pos: int;
   my_cards:card list;
+  table: card list;
   (* cartes des adversaires, dans un array, si il y a 8 joueurs dans la table, l'array fait donc 7 élements (nos propres cartes sont stockées dans my_cards) *)
   players_cards: card list array
   
 }
-;;
+
 let init c0 c1 my_pos n_players = 
   {
+    heap = Heap.select_card c1 (Heap.select_card c0 Heap.init_heap);
     tour = Preflop;
-    num_players = 0;
+    num_players = n_players;
     my_pos = my_pos;
     my_cards = [c0;c1];
-    players_cards = Array.make n_players []
+    table = [];
+    players_cards = Array.make (n_players-1) []
   }
-
 ;;
+
+(* distribue 2 cartes aléatoirement a chaqu'un des joueurs et passe de l'état pre_flop à flop*)
+let foward_preflop state= 
+  let heap = ref state.heap in
+    for i = 0 to state.num_players -2 do
+      let c0, h0 = Heap.take_card !heap in
+      let c1, h1 = Heap.take_card h0 in
+	state.players_cards.(i) <- [c0;c1];
+	heap := h1
+    done;
+    {state with heap = !heap; tour = Flop}
+;;
+let foward state = match state.tour with
+  | Preflop -> 
+      foward_preflop state
+  | Flop -> 
+      let c1, h1 =  Heap.take_card state.heap in
+      let c2, h2 =  Heap.take_card h1 in
+      let c3, h3 =  Heap.take_card h2 in
+	{state with heap = h3; table = [c1;c2;c3]; tour = Turn}
+  | Turn -> 
+      let c, h =  Heap.take_card state.heap in
+	{state with heap = h; table = c::state.table; tour = River}
+  | River -> 
+      let c, h =  Heap.take_card state.heap in
+	{state with heap = h; table = c::state.table; tour = End}
+  | End -> state
+;;
+let h = init (V 10, Clubs) (V 9, Clubs) 2 8;;
+let h = foward h;;
