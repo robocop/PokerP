@@ -1,0 +1,25 @@
+Pour compiler : 
+================
+ocamlopt poker.ml -o poker
+ou
+ocamlbuild poker.native
+
+Syntaxe d'utilisation
+=====================
+
+Quand le programme demande une carte, entrez d'abord le type de carte, cad: 
+      -      a pour ace
+      -	     k pour king
+      -	     q pour queen
+      -	     j pour jack
+      -      v10 pour 10
+      -      v2 pour 2
+      -      etc.
+
+Appuyiez sur entrée. Donnez maintenant la couleur de la carte, cad:
+      -	     h pour Hearts
+      -	     s pour Spades
+      -	     c pour Clubs
+      -	     d pour Diamonds
+
+Suivez le programme et il calculera votre probabilité de gain tout au long de la partie.
