@@ -4,13 +4,13 @@ type card_type =
   | Queen
   | Jack
   | V of int
-;;
+
 type color = 
     Hearts
   | Spades
   | Clubs
   | Diamonds
-;;
+
 type card = card_type * color;;
 
 type hand = 
@@ -24,7 +24,6 @@ type hand =
   | Two_pair of card * card * card list
   | Pair of card * card list
   | High_card of card list
-;;
 
 exception Invalid_List;;
 
@@ -41,19 +40,67 @@ let take_drop n l =
   in take' [] n l
 ;;
 
+let eval_type = function
+  | Ace -> 14
+  | King -> 13
+  | Queen -> 12
+  | Jack -> 11
+  | V e -> e
+let eval_card (t,_) = eval_type t
+
+
+module Heap = 
+struct
+  let l_cardt = [Ace; King; Queen; Jack; V 10; V 9; V 8; V 7; V 6; V 5; V 4; V 3; V 2]
+  let l_colors = [Hearts; Spades; Clubs; Diamonds]
+  let init() = Random.self_init()
+  (* retourne true avec une probabilite de 1/n *)
+  let prob n () = Random.int n = 0
+  let rec make_tl e = function
+    | [] -> []
+    | h::t -> (h, e)::make_tl e t
+  (* Retourne le jeu de 52 cartes *)
+  let init_cards = List.concat $ List.map (fun e -> make_tl e l_cardt) l_colors;;
+
+  type heap = int * card list
+  let init_heap = (52, init_cards)
+
+  let take_card (n, cards) = 
+    let rec aux l c = function
+      | [] -> failwith "empty heap"
+      | e::tail ->
+	  if prob c () then (e, (n-1, l@tail))
+	  else
+	    aux (e::l) (c-1) tail
+    in
+      aux [] n cards
+  let select_card card (n, list) = 
+    let rec aux l = function
+      | [] -> failwith "card not found"
+      | e::t ->
+	  if e = card then (n-1, l@t)
+	  else
+	    aux (e::l) t
+    in
+      aux [] list
+
+  let rec fusion = function
+    | ([], li) | (li, []) -> li
+    | ca::queue_a, cb::queue_b ->
+	let bonne_tete, queue, autre_demi_liste =
+	  if eval_card ca > eval_card cb
+	  then ca, queue_a, cb::queue_b
+	  else cb, queue_b, ca::queue_a in
+	  bonne_tete :: fusion (queue, autre_demi_liste)
+  let rec insert elem list = match list with
+    |  [] -> elem::[]
+    |  tete::queue ->
+	 if eval_card elem > eval_card tete then elem :: list
+	 else tete :: insert elem queue
+end;;
+
 module Eval = 
 struct
-  let eval_type = function
-    | Ace -> 14
-    | King -> 13
-    | Queen -> 12
-    | Jack -> 11
-    | V e -> e
-  let eval_card (t,_) = eval_type t
-
-  let sort_list list= 
-    let l = List.map (fun c -> (c, eval_card c)) list in
-      List.map fst $ List.sort (fun (_,a) (_,b) -> compare b a) l
   let same f l = 
     let rec same' v = function
       | [] -> true
@@ -103,8 +150,7 @@ struct
 	      (p1, p2, l')
 
   (* Looks for the poker hands in a list of 7 cards, ie transforms a list of 7 cards into a poker hand *)
-  let eval_list m = 
-    let main = sort_list m in
+  let eval_list main = 
       match main with
 	  (* Royal flush *)
 	| [(Ace,c0); (King,c1); (Queen,c2); (Jack,c3); (V 10, c4); _; _] when same id [c0;c1;c2;c3;c4] ->
@@ -203,43 +249,11 @@ struct
       else if a' < b' then -1
       else
 	compare_kickers (a, b)
-end
+  (* Compare 2 hand of 7 cards, cards have to be sort. *)
+  let compare_list a b = 
+     compare_hand (eval_list a) (eval_list b) >= 0
+end;;
 
-module Heap = 
-struct
-  let l_cardt = [Ace; King; Queen; Jack; V 10; V 9; V 8; V 7; V 6; V 5; V 4; V 3; V 2]
-  let l_colors = [Hearts; Spades; Clubs; Diamonds]
-  let init() = Random.self_init()
-  (* retourne true avec une probabilite de 1/n *)
-  let prob n () = Random.int n = 0
-  let rec make_tl e = function
-    | [] -> []
-    | h::t -> (h, e)::make_tl e t
-  (* Retourne le jeu de 52 cartes *)
-  let init_cards = List.concat $ List.map (fun e -> make_tl e l_cardt) l_colors;;
-
-  type heap = int * card list
-  let init_heap = (52, init_cards)
-
-  let take_card (n, cards) = 
-    let rec aux l c = function
-      | [] -> failwith "empty heap"
-      | e::tail ->
-	  if prob c () then (e, (n-1, l@tail))
-	  else
-	    aux (e::l) (c-1) tail
-    in
-      aux [] n cards
-  let select_card card (n, list) = 
-    let rec aux l = function
-      | [] -> failwith "card not found"
-      | e::t ->
-	  if e = card then (n-1, l@t)
-	  else
-	    aux (e::l) t
-    in
-      aux [] list
-end
 type tour_type = 
     Preflop
   | Flop
@@ -271,38 +285,158 @@ let init c0 c1 my_pos n_players =
     tour = Preflop;
     num_players = n_players;
     my_pos = my_pos;
-    my_cards = [c0;c1];
+    my_cards = Heap.insert c1 [c0];
     table = [];
     players_cards = Array.make (n_players-1) []
   }
 ;;
-
+let next state = 
+  let next' state = match List.length $ state.table with
+    | 0 -> Flop
+    | 3 -> Turn
+    | 4 -> River
+    | 5 -> End
+    | _ -> failwith "invalid state"
+  in
+    {state with tour = next' state }
+;;
 (* distribue 2 cartes aléatoirement a chaqu'un des joueurs et passe de l'état pre_flop à flop*)
 let foward_preflop state= 
   let heap = ref state.heap in
     for i = 0 to state.num_players -2 do
       let c0, h0 = Heap.take_card !heap in
       let c1, h1 = Heap.take_card h0 in
-	state.players_cards.(i) <- [c0;c1];
+	state.players_cards.(i) <- Heap.insert c1 [c0];
 	heap := h1
     done;
     {state with heap = !heap; tour = Flop}
 ;;
 let foward state = match state.tour with
   | Preflop -> 
-      foward_preflop state
+      next $ foward_preflop state
   | Flop -> 
       let c1, h1 =  Heap.take_card state.heap in
       let c2, h2 =  Heap.take_card h1 in
       let c3, h3 =  Heap.take_card h2 in
-	{state with heap = h3; table = [c1;c2;c3]; tour = Turn}
+	next {state with heap = h3; table = Heap.insert c3 (Heap.insert c2 [c1]); tour = Turn}
   | Turn -> 
       let c, h =  Heap.take_card state.heap in
-	{state with heap = h; table = c::state.table; tour = River}
+	next {state with heap = h; table = Heap.insert c state.table; tour = River}
   | River -> 
       let c, h =  Heap.take_card state.heap in
-	{state with heap = h; table = c::state.table; tour = End}
+	next {state with heap = h; table = Heap.insert c state.table; tour = End}
   | End -> state
 ;;
 let h = init (V 10, Clubs) (V 9, Clubs) 2 8;;
+
 let h = foward h;;
+
+(* determine d'un etat si on est gagnant*)
+let are_you_win game = 
+  let rec compare mines = function
+    | [] -> true
+    | j::l ->
+	let player = Heap.fusion (game.table, j) in
+	  if Eval.compare_list player mines then false
+	  else compare mines l
+  in
+    compare $ Heap.fusion (game.my_cards ,game.table) $ (Array.to_list game.players_cards)
+	    
+;;
+
+let make f n = 
+  let rec aux l = function
+    | 0 -> l 
+    | n -> aux $ f ()::l $ n-1
+  in
+    aux [] n
+;;
+let compute_prob s t= 
+ let a, b, c = match t with
+    | Preflop -> (80,15,5)
+    | Flop -> (80, 0, 19)
+    | Turn -> (300,0,60)
+    | River -> (10000,0,0)
+    | End -> (0,0,0)
+ in
+  (* Printf.printf "(%d, %d, %d)" a b c; *)
+  let rec compute_prob' state = 
+    let count n = 
+      let l = make (fun () -> compute_prob' $ foward state) n in
+	List.fold_left (fun (x0, y0) (x1,y1) -> (x0+x1, y0+y1)) (0,0) l 
+    in
+      match state.tour with
+	| End ->
+	    ((if are_you_win state then 1 else 0), 1)
+	| River -> count c
+	| Turn ->  count c
+	| Flop ->  count b
+	| Preflop -> count a
+  in
+    compute_prob' s
+;;
+
+let get_prob s t = let a, n = compute_prob s t in float_of_int a /. float_of_int n;;
+
+
+let rec scan_card () = 
+  let scan_color s= 
+    print_endline s;
+    match s with
+      | "h" -> Hearts
+      | "s" -> Spades
+      | "c" -> Clubs
+      | "d" -> Diamonds
+      | _ -> failwith "invalid color: color is in {h,s,c,d}"
+  in
+  let scan_type_card s =
+    print_endline s; 
+    match s with
+      | "a" -> Ace
+      | "k" -> King
+      | "q" -> Queen
+      | "j" -> Jack
+      | card when card.[0] = 'v' -> 
+	  V (int_of_string (String.sub card 1 (String.length card -1)))
+      | _ -> failwith "invalid type card, card is in {a, k, q, j, v int)"
+  in
+  let scan () =
+    let s0 = read_line() in
+    let s1 = read_line() in
+      (scan_type_card s0, scan_color s1)
+  in
+    try
+      scan () 
+    with 
+      | Failure s -> 
+	  print_endline s;
+	  scan_card ()
+;;
+
+let add_on_table c state=
+   {state with heap = Heap.select_card c state.heap; table = Heap.insert c state.table}
+;;
+let _ = 
+  Random.self_init();
+  print_endline "preflop";
+  let nb = read_int (print_endline "nombre de joueurs sur la table ?") in
+  print_endline "entrez vos deux cartes";
+  let c0 = scan_card () in
+    print_endline "card 1 ok";
+  let c1 = scan_card () in
+    print_endline "card 2 ok";
+  let h = init c0 c1 2 nb in
+    Printf.printf "probabilite de gain estime : %f \n" (get_prob h Preflop);
+    print_endline "entrez les 3 cartes du flop";
+    let c0, c1, c2 = scan_card (), scan_card (), scan_card () in
+    let h = add_on_table c2 (add_on_table c1 (add_on_table c0 h)) in
+      Printf.printf "probabilite de gain estime : %f \n" (get_prob h Flop);
+      print_endline "entrez la carte du turn";
+      let h = add_on_table (scan_card()) h in
+	Printf.printf "probabilite de gain estime : %f \n" (get_prob h Turn);
+	print_endline "entrez la carte du river";
+	 let h = add_on_table (scan_card()) h in
+	   	Printf.printf "probabilite de gain estime : %f \n" (get_prob h River)
+
+
+  
